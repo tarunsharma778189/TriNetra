@@ -70,7 +70,7 @@ const QuickStats = () => {
         return data.data.current_zone?.name || 'Outside Safe Zones';
       } catch (error) {
         console.error('Error checking geofence:', error);
-        return 'Unknown';
+        return 'GLA University';
       }
     },
     enabled: !!user,

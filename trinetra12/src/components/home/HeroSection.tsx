@@ -8,7 +8,7 @@ const HeroSection = () => {
   const navigate = useNavigate();
 
   const handleButtonClick = () => {
-    navigate(user ? "/dashboard" : "/auth");
+    navigate("/auth");
   };
   return (
     <section className="relative min-h-[90vh] flex items-center overflow-hidden">
@@ -18,7 +18,7 @@ const HeroSection = () => {
         <div className="grid lg:grid-cols-2 gap-12 items-center">
           <div className="space-y-8 animate-fade-in">
             <h1 className="text-5xl md:text-7xl font-bold leading-tight">
-              Your Personal <span className="gradient-hero bg-clip-text text-transparent">Safety Guardian</span>
+              Your Personal <span className="bg-blue-600 text-white px-4 py-2 rounded-lg">TriNetra</span>
             </h1>
             
             <p className="text-xl text-muted-foreground max-w-lg">
@@ -28,7 +28,7 @@ const HeroSection = () => {
             <div className="flex flex-col sm:flex-row gap-4">
               <Button size="lg" className="gradient-hero shadow-glow text-lg px-8 py-6" onClick={handleButtonClick}>
                 <Smartphone className="mr-2 h-5 w-5" />
-                {user ? "Launch Dashboard" : "Get Started"}
+                Get Started
               </Button>
               <Button size="lg" variant="outline" className="text-lg px-8 py-6">
                 Watch Demo
@@ -56,7 +56,7 @@ const HeroSection = () => {
           <div className="relative animate-scale-in">
             <div className="relative z-10 bg-card rounded-3xl shadow-2xl p-8 border">
               <img 
-                src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?w=600&h=800&fit=crop" 
+                src="https://i.postimg.cc/PrcWHDfk/Whats-App-Image-2025-10-10-at-01-52-09-50f32592.jpg" 
                 alt="TriNetra App Interface"
                 className="rounded-2xl w-full"
               />

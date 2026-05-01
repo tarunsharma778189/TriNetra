@@ -1,48 +1,62 @@
-import { MapPin, Navigation, Loader2 } from "lucide-react";
+import { MapPin, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+
+// Fix default marker icons
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
+  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
+});
+
+const DELHI = { lat: 28.6139, lng: 77.209 };
 
 const MapView = () => {
   const { user } = useAuth();
   const mapRef = useRef<HTMLDivElement>(null);
-  const [map, setMap] = useState<google.maps.Map | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [currentAddress, setCurrentAddress] = useState("Loading...");
+  const [currentAddress, setCurrentAddress] = useState("Fetching location...");
 
   const { data: safeZones } = useQuery({
-    queryKey: ['safe-zones', user?.id],
+    queryKey: ["safe-zones", user?.id],
     queryFn: async () => {
       if (!user) return [];
       const { data, error } = await supabase
-        .from('safe_zones')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('is_active', true);
-      
+        .from("safe_zones")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("is_active", true);
       if (error) throw error;
       return data || [];
     },
-    enabled: !!user
+    enabled: !!user,
   });
 
+  // Init map
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.google && mapRef.current && !map) {
-      const newMap = new google.maps.Map(mapRef.current, {
-        zoom: 15,
-        center: { lat: 28.6139, lng: 77.2090 }, // Default to Delhi
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: false,
-      });
-      setMap(newMap);
-    }
-  }, [map]);
+    if (!mapRef.current || mapInstanceRef.current) return;
 
-  useEffect(() => {
-    if (navigator.geolocation && map) {
+    const map = L.map(mapRef.current, { zoomControl: true }).setView(
+      [DELHI.lat, DELHI.lng],
+      13
+    );
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    mapInstanceRef.current = map;
+
+    // Get user location
+    if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const pos = {
@@ -50,76 +64,78 @@ const MapView = () => {
             lng: position.coords.longitude,
           };
           setUserLocation(pos);
-          map.setCenter(pos);
+          map.setView([pos.lat, pos.lng], 15);
 
-          // Add user location marker
-          new google.maps.Marker({
-            position: pos,
-            map: map,
-            title: "Your Location",
-            icon: {
-              url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <circle cx="12" cy="12" r="8" fill="#3b82f6" stroke="white" stroke-width="2"/>
-                  <circle cx="12" cy="12" r="3" fill="white"/>
-                </svg>
-              `),
-              scaledSize: new google.maps.Size(24, 24),
-            },
+          // User location marker
+          const userIcon = L.divIcon({
+            html: `<div style="width:16px;height:16px;background:#3b82f6;border:3px solid white;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4)"></div>`,
+            className: "",
+            iconSize: [16, 16],
+            iconAnchor: [8, 8],
           });
+          L.marker([pos.lat, pos.lng], { icon: userIcon })
+            .addTo(map)
+            .bindPopup("Your Location")
+            .openPopup();
 
-          // Reverse geocoding to get address
-          const geocoder = new google.maps.Geocoder();
-          geocoder.geocode({ location: pos }, (results, status) => {
-            if (status === 'OK' && results?.[0]) {
-              setCurrentAddress(results[0].formatted_address);
-            }
-          });
+          // Geofence circle
+          L.circle([pos.lat, pos.lng], {
+            radius: 500,
+            color: "#22c55e",
+            fillColor: "#22c55e",
+            fillOpacity: 0.1,
+            weight: 2,
+          }).addTo(map);
+
+          // Reverse geocode via Nominatim
+          fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${pos.lat}&lon=${pos.lng}&format=json`
+          )
+            .then((r) => r.json())
+            .then((d) => setCurrentAddress(d.display_name || "Unknown location"))
+            .catch(() => setCurrentAddress("Location found"));
         },
-        () => {
-          console.error('Error getting location');
-        }
+        () => setCurrentAddress("Location access denied")
       );
     }
-  }, [map]);
 
+    return () => {
+      map.remove();
+      mapInstanceRef.current = null;
+    };
+  }, []);
+
+  // Add safe zone markers
   useEffect(() => {
-    if (map && safeZones) {
-      safeZones.forEach((zone) => {
-        // Add safe zone circle
-        new google.maps.Circle({
-          strokeColor: '#10b981',
-          strokeOpacity: 0.8,
-          strokeWeight: 2,
-          fillColor: '#10b981',
-          fillOpacity: 0.15,
-          map: map,
-          center: { lat: zone.latitude, lng: zone.longitude },
-          radius: zone.radius_meters,
-        });
+    const map = mapInstanceRef.current;
+    if (!map || !safeZones) return;
 
-        // Add safe zone marker
-        new google.maps.Marker({
-          position: { lat: zone.latitude, lng: zone.longitude },
-          map: map,
-          title: zone.name,
-          icon: {
-            url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z" fill="#10b981"/>
-              </svg>
-            `),
-            scaledSize: new google.maps.Size(24, 24),
-          },
-        });
+    safeZones.forEach((zone) => {
+      L.circle([zone.latitude, zone.longitude], {
+        radius: zone.radius_meters,
+        color: "#10b981",
+        fillColor: "#10b981",
+        fillOpacity: 0.15,
+        weight: 2,
+      })
+        .addTo(map)
+        .bindPopup(zone.name);
+
+      const zoneIcon = L.divIcon({
+        html: `<div style="width:12px;height:12px;background:#10b981;border:2px solid white;border-radius:50%"></div>`,
+        className: "",
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
       });
-    }
-  }, [map, safeZones]);
+      L.marker([zone.latitude, zone.longitude], { icon: zoneIcon })
+        .addTo(map)
+        .bindPopup(zone.name);
+    });
+  }, [safeZones]);
 
   const centerOnUser = () => {
-    if (userLocation && map) {
-      map.setCenter(userLocation);
-      map.setZoom(16);
+    if (userLocation && mapInstanceRef.current) {
+      mapInstanceRef.current.setView([userLocation.lat, userLocation.lng], 16);
     }
   };
 
@@ -135,28 +151,25 @@ const MapView = () => {
           Center on Me
         </Button>
       </div>
-      
+
       <div className="relative h-96 bg-muted rounded-lg overflow-hidden">
         <div ref={mapRef} className="w-full h-full" />
-        
-        <div className="absolute top-4 right-4 bg-card rounded-lg shadow-lg p-3 border">
+        <div className="absolute top-4 right-4 z-[1000] bg-card rounded-lg shadow-lg p-3 border">
           <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-success animate-pulse"></div>
+            <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse"></div>
             <span className="text-sm font-medium">Status: Safe</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">Last updated: Just now</p>
         </div>
       </div>
-      
+
       <div className="grid grid-cols-2 gap-3">
         <div className="bg-success/10 border border-success/20 rounded-lg p-3">
           <p className="text-xs text-muted-foreground">Current Location</p>
           <p className="font-medium text-sm mt-1">
-            {currentAddress === "Loading..." ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              currentAddress.length > 30 ? currentAddress.substring(0, 30) + "..." : currentAddress
-            )}
+            {currentAddress.length > 40
+              ? currentAddress.substring(0, 40) + "..."
+              : currentAddress}
           </p>
         </div>
         <div className="bg-primary/10 border border-primary/20 rounded-lg p-3">

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Mail, Lock, User, Phone } from "lucide-react";
+import { Mail, Lock, User, Phone, CheckCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import { toast } from "sonner";
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [signupDone, setSignupDone] = useState(false);
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
@@ -19,6 +20,15 @@ const Auth = () => {
     full_name: "",
     phone: "",
   });
+  const [phoneError, setPhoneError] = useState("");
+
+  const validatePhone = (value: string) => {
+    const digits = value.replace(/\D/g, "");
+    if (digits.length === 0) return "";
+    if (digits.length !== 10) return "Phone number must be exactly 10 digits";
+    if (!/^[6-9]/.test(digits)) return "Enter a valid Indian mobile number";
+    return "";
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,52 +41,89 @@ const Auth = () => {
           password: formData.password,
         });
 
-        if (error) throw error;
+        if (error) {
+          if (error.message.toLowerCase().includes("email not confirmed")) {
+            toast.error("Please verify your email before logging in. Check your inbox.");
+          } else {
+            toast.error(error.message || "Login failed");
+          }
+          return;
+        }
+
+        // Check if email is confirmed
+        if (data.user && !data.user.email_confirmed_at) {
+          await supabase.auth.signOut();
+          toast.error("Please verify your email before logging in. Check your inbox.");
+          return;
+        }
 
         toast.success("Welcome back!");
-        navigate("/dashboard");
+        if (data.user?.email === "ts7621085@gmail.com") {
+          navigate("/admin");
+        } else {
+          navigate("/dashboard");
+        }
       } else {
+        const phoneDigits = formData.phone.replace(/\D/g, "");
+        if (phoneDigits.length !== 10 || !/^[6-9]/.test(phoneDigits)) {
+          toast.error("Enter a valid 10-digit Indian mobile number");
+          return;
+        }
+
         const { data, error } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
           options: {
-            data: {
-              full_name: formData.full_name,
-              phone: formData.phone,
-            },
-            emailRedirectTo: window.location.origin + '/dashboard'
+            data: { full_name: formData.full_name, phone: formData.phone },
+            emailRedirectTo: window.location.origin + "/dashboard",
           },
         });
 
         if (error) throw error;
 
-        // Create profile after successful signup
         if (data.user) {
-          const { error: profileError } = await supabase
-            .from('profiles')
-            .insert({
-              id: data.user.id,
-              full_name: formData.full_name,
-              phone: formData.phone,
-              reward_points: 0
-            });
-
-          if (profileError) {
-            console.error('Profile creation error:', profileError);
-            // Don't throw error here as user is already created
-          }
+          await supabase.from("profiles").insert({
+            id: data.user.id,
+            full_name: formData.full_name,
+            phone: formData.phone,
+            reward_points: 0,
+          });
         }
 
-        toast.success("Account created successfully!");
-        navigate("/dashboard");
+        setSignupDone(true);
       }
     } catch (error: any) {
-      console.error("Auth error:", error);
-      toast.error(error.message || "Authentication failed");
+      toast.error(error.message || "Something went wrong");
     } finally {
       setLoading(false);
     }
   };
+
+  // Show success screen after signup
+  if (signupDone) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-secondary/20 p-4">
+        <Card className="w-full max-w-md p-8 text-center">
+          <div className="flex flex-col items-center gap-4">
+            <CheckCircle className="h-16 w-16 text-green-500" />
+            <h2 className="text-2xl font-bold">Verify your email</h2>
+            <p className="text-muted-foreground">
+              We sent a confirmation link to <span className="font-semibold text-foreground">{formData.email}</span>
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Please check your inbox and click the link to activate your account. Then come back and log in.
+            </p>
+            <Button
+              className="w-full gradient-hero mt-2"
+              onClick={() => { setSignupDone(false); setIsLogin(true); }}
+            >
+              Go to Login
+            </Button>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-secondary/20 p-4">
@@ -105,7 +152,7 @@ const Auth = () => {
                     value={formData.full_name}
                     onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
                     className="pl-10"
-                    required={!isLogin}
+                    required
                   />
                 </div>
               </div>
@@ -117,12 +164,19 @@ const Auth = () => {
                   <Input
                     id="phone"
                     type="tel"
-                    placeholder="+91 98765 43210"
+                    placeholder="98765 43210"
                     value={formData.phone}
-                    onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    className="pl-10"
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setFormData({ ...formData, phone: val });
+                      setPhoneError(validatePhone(val));
+                    }}
+                    className={`pl-10 ${phoneError ? "border-destructive" : ""}`}
+                    maxLength={10}
+                    required
                   />
                 </div>
+                {phoneError && <p className="text-xs text-destructive mt-1">{phoneError}</p>}
               </div>
             </>
           )}

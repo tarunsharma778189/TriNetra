@@ -93,28 +93,69 @@ export const useTimerCheckIn = () => {
         navigator.geolocation.getCurrentPosition(resolve, reject);
       });
 
-      const { error } = await supabase.functions.invoke('trigger-sos', {
-        body: { 
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          trigger_type: 'timer_expired'
-        }
+      const { latitude, longitude } = position.coords;
+
+      // Reverse geocode
+      let locationAddress = `Lat ${latitude.toFixed(6)}, Lng ${longitude.toFixed(6)}`;
+      try {
+        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`);
+        const geoData = await geoRes.json();
+        if (geoData.display_name) locationAddress = geoData.display_name;
+      } catch (_) {}
+
+      // Get emergency contacts and profile
+      const { data: contacts } = await supabase
+        .from('emergency_contacts')
+        .select('*')
+        .eq('user_id', user!.id)
+        .order('priority', { ascending: true });
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user!.id)
+        .single();
+
+      // Create SOS log
+      await supabase.from('sos_logs').insert({
+        user_id: user!.id,
+        latitude,
+        longitude,
+        location_address: locationAddress,
+        trigger_type: 'timer_expired',
+        status: 'active'
       });
 
-      if (error) throw error;
-
+      // Update timer status
       await supabase
         .from('timer_checkins')
-        .update({ status: 'expired' })
+        .update({ status: 'triggered_sos' })
         .eq('id', timerId);
+
+      // Send SMS to emergency contacts
+      if (contacts && contacts.length > 0) {
+        const userName = profile?.full_name || 'User';
+        const timestamp = new Date().toLocaleString();
+        const mapsLink = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+        const smsMessage = `EMERGENCY — ${userName} missed their safety timer check-in.\nLocation: ${locationAddress}\nCoordinates: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}\nTime: ${timestamp}\nMap: ${mapsLink}`;
+
+        contacts.forEach((contact, index) => {
+          setTimeout(() => {
+            window.open(`sms:${contact.phone}?body=${encodeURIComponent(smsMessage)}`, '_blank');
+          }, index * 1000);
+          setTimeout(() => {
+            window.open(`tel:${contact.phone}`, '_self');
+          }, (index * 2000) + 5000);
+        });
+      }
 
       setShowAlert(false);
       setShowSecurityAlert(true);
       queryClient.invalidateQueries({ queryKey: ['active-timer'] });
-      
-      if (alertTimerRef.current) {
-        clearInterval(alertTimerRef.current);
-      }
+
+      if (alertTimerRef.current) clearInterval(alertTimerRef.current);
+
+      toast.error('🚨 SOS triggered — timer expired!');
     } catch (error) {
       console.error('Auto-SOS trigger failed:', error);
       toast.error('Failed to trigger SOS. Please trigger manually.');

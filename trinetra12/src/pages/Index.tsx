@@ -23,9 +23,9 @@ const Index = () => {
             <Link to="/auth">
               <Button variant="outline" size="sm">Sign In</Button>
             </Link>
-            <Link to={user ? "/dashboard" : "/auth"}>
+            <Link to="/auth">
               <Button size="sm" className="gradient-hero">
-                {user ? "Dashboard" : "Get Started"}
+                Get Started
               </Button>
             </Link>
           </div>

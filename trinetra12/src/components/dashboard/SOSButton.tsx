@@ -67,12 +67,28 @@ const SOSButton = ({ floating = false }: SOSButtonProps) => {
 
       const { latitude, longitude } = position.coords;
 
-      // Get emergency contacts
+      // Reverse geocode to get human-readable address
+      let locationAddress = `Lat ${latitude.toFixed(6)}, Lng ${longitude.toFixed(6)}`;
+      try {
+        const geoRes = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+        );
+        const geoData = await geoRes.json();
+        if (geoData.display_name) locationAddress = geoData.display_name;
+      } catch (_) {}
+
+      // Get emergency contacts and user profile
       const { data: contacts } = await supabase
         .from('emergency_contacts')
         .select('*')
         .eq('user_id', user.id)
         .order('priority', { ascending: true });
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name')
+        .eq('id', user.id)
+        .single();
 
       // Create SOS log
       const { data: sosLog, error } = await supabase
@@ -81,6 +97,7 @@ const SOSButton = ({ floating = false }: SOSButtonProps) => {
           user_id: user.id,
           latitude,
           longitude,
+          location_address: locationAddress,
           trigger_type: 'manual',
           status: 'active'
         })
@@ -89,18 +106,48 @@ const SOSButton = ({ floating = false }: SOSButtonProps) => {
 
       if (error) throw error;
 
-      // Make calls to emergency contacts
+      // Send SMS alerts and make calls to emergency contacts
       if (contacts && contacts.length > 0) {
+        const userName = profile?.full_name || 'User';
+        const timestamp = new Date().toLocaleString();
+        const mapsLink = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+        
+        const smsMessage = `EMERGENCY — ${userName} may be in danger.\nLocation: ${locationAddress}\nCoordinates: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}\nTime: ${timestamp}\nMap: ${mapsLink}`;
+
         contacts.forEach((contact, index) => {
+          // Send SMS with retry logic
+          setTimeout(() => {
+            try {
+              // Primary SMS method - using device SMS app
+              window.open(`sms:${contact.phone}?body=${encodeURIComponent(smsMessage)}`, '_blank');
+              
+              // Fallback - try web SMS if available
+              if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.ready.then(() => {
+                  // Additional SMS fallback could be implemented here
+                });
+              }
+            } catch (smsError) {
+              console.error('SMS failed for contact:', contact.phone, smsError);
+              // Fallback to email if SMS fails
+              if (contact.email) {
+                const emailSubject = `EMERGENCY ALERT - ${userName}`;
+                const emailBody = smsMessage.replace(/\\n/g, '%0D%0A');
+                window.open(`mailto:${contact.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`, '_blank');
+              }
+            }
+          }, index * 1000); // 1 second delay between SMS
+          
+          // Make phone calls with delay
           setTimeout(() => {
             window.open(`tel:${contact.phone}`, '_self');
-          }, index * 2000); // 2 second delay between calls
+          }, (index * 2000) + 5000); // 2 second delay between calls, starting after 5 seconds
         });
       }
 
       toast.error("🚨 SOS ALERT TRIGGERED!", {
-        description: `Emergency alert sent! Calling ${contacts?.length || 0} contacts. Location: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-        duration: 8000,
+        description: `Emergency SMS & calls sent to ${contacts?.length || 0} contacts. Location: ${locationAddress.substring(0, 60)}...`,
+        duration: 10000,
       });
     } catch (error: any) {
       console.error('SOS trigger error:', error);

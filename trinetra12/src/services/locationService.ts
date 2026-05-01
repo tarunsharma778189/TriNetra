@@ -63,25 +63,65 @@ export class LocationService {
       }
 
       // Check geofence
-      await this.checkGeofence(latitude, longitude);
+      await this.checkGeofence(userId, latitude, longitude);
     } catch (error) {
       console.error('Error handling location update:', error);
     }
   }
 
-  private async checkGeofence(latitude: number, longitude: number) {
+  private lastGeofenceStatus: boolean | null = null;
+
+  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371000;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  private async checkGeofence(userId: string, latitude: number, longitude: number) {
     try {
-      const { data, error } = await supabase.functions.invoke('check-geofence', {
-        body: { latitude, longitude }
-      });
+      const { data: safeZones, error } = await supabase
+        .from('safe_zones')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_active', true);
 
-      if (error) throw error;
+      if (error || !safeZones || safeZones.length === 0) return;
 
-      // The geofence function will automatically trigger SOS if needed
-      return data.data;
+      const insideSafeZone = safeZones.some((zone) =>
+        this.calculateDistance(latitude, longitude, parseFloat(zone.latitude), parseFloat(zone.longitude)) <= zone.radius_meters
+      );
+
+      // Only alert when transitioning from inside -> outside
+      if (this.lastGeofenceStatus === true && !insideSafeZone) {
+        // Browser notification
+        if (Notification.permission === 'granted') {
+          new Notification('⚠️ Safe Zone Alert', {
+            body: 'You have left your safe zone!',
+            icon: '/favicon.ico'
+          });
+        } else if (Notification.permission !== 'denied') {
+          Notification.requestPermission().then((perm) => {
+            if (perm === 'granted') {
+              new Notification('⚠️ Safe Zone Alert', {
+                body: 'You have left your safe zone!',
+                icon: '/favicon.ico'
+              });
+            }
+          });
+        }
+
+        // Toast via custom event (picked up in Dashboard)
+        window.dispatchEvent(new CustomEvent('geofence-exit'));
+      }
+
+      this.lastGeofenceStatus = insideSafeZone;
     } catch (error) {
       console.error('Geofence check error:', error);
-      return null;
     }
   }
 

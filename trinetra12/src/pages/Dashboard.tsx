@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Shield, MapPin, Users, Clock, Phone, Settings, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
@@ -29,11 +30,20 @@ const Dashboard = () => {
       locationService.startLocationTracking(user.id).catch(error => {
         console.error('Failed to start location tracking:', error);
       });
-    }
 
-    return () => {
-      locationService.stopLocationTracking();
-    };
+      // Listen for geofence exit event
+      const handleGeofenceExit = () => {
+        toast.warning('⚠️ Safe Zone Alert', {
+          description: 'You have left your safe zone!',
+          duration: 8000,
+        });
+      };
+      window.addEventListener('geofence-exit', handleGeofenceExit);
+      return () => {
+        locationService.stopLocationTracking();
+        window.removeEventListener('geofence-exit', handleGeofenceExit);
+      };
+    }
   }, [user]);
 
   return (
